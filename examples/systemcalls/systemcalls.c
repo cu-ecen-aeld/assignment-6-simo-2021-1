@@ -1,10 +1,10 @@
 #include "systemcalls.h"
 
-#include <stdio.h>    // Pour perror()
-#include <stdlib.h>   // Pour abort()
-#include <unistd.h>   // Pour fork(), execv(), dup2(), close()
-#include <sys/wait.h> // Pour waitpid(), WIFEXITED(), WEXITSTATUS()
-#include <fcntl.h>    // Pour open()
+#include <stdio.h>    // for perror()
+#include <stdlib.h>   // for abort()
+#include <unistd.h>   // for fork(), execv(), dup2(), close()
+#include <sys/wait.h> // for waitpid(), WIFEXITED(), WEXITSTATUS()
+#include <fcntl.h>    // for open()
 
 /**
  * @param cmd the command to execute with system()
@@ -27,11 +27,11 @@ bool do_system(const char *cmd)
     
    if (ret != -1 && WEXITSTATUS(ret) == 0) {
         //printf("Commande réussie !\n");
-        printf("Commande réussie: %s\n", cmd);
+        printf("Cmd succeded: %s\n", cmd);
         printf("                           \n");
         return true;
     } else {
-        printf("Commande échouée !\n");
+        printf("Cmd failed !\n");
         return false;
     }
 }
@@ -52,7 +52,7 @@ bool do_system(const char *cmd)
 
 bool do_exec(int count, ...)
 {
-	printf("--START__do_exec()__ --- \n\n");
+    printf("--START__do_exec()__ --- \n\n");
     // Initialisation de la liste d'arguments variables
     va_list args;
     va_start(args, count);
@@ -97,6 +97,7 @@ bool do_exec(int count, ...)
         perror("execv() a échoué");
         exit(EXIT_FAILURE);
     }
+    
     // Étape 4 : Code exécuté par le père
     else
     {

@@ -1,326 +1,307 @@
-/*#  socket based program for assignment 5 part 1
-# Author: Arnaud Simo
-# 07.01.2026
-# Ce programme IMPLEMENTE UN socket server inscrivant des chaines de charactère dans un fichier.
-Pour le tester dans un premier temps
-	ouvrir une 2e fenetrre: lancer nc localhost 9000
-	mais avant il faudrait dans le premiere fenetre lancer: ./aesdsocket
+/**********************************************************************
+ * Programme socket serveur SIMPLE
+ * - Accepte UNE connexion
+ * - Reçoit une chaîne de caractères via: echo "Bonjour3" | nc localhost 9000 
+name: simple_server.c
+ * - L'écrit DANS UN FICHIER
+ * - Ferme la connexion
+ * 
+ * Ce programme est un exemple de serveur TCP simple qui écoute sur le port 9000.
+ * Il accepte une connexion à la fois, reçoit des données du client, les écrit dans un fichier,
+ * puis ferme la connexion. Le serveur continue à écouter pour de nouvelles connexions après chaque client
+ * Note: Ce code est conçu pour être simple et didactique, et n'est pas optimisé pour la performance ou la sécurité.
+ * cmd pour tester: 
+ *  echo "Lundi" | nc localhost 9000 & echo "Mardi" | nc localhost 9000   
+ *      ./server/sockettest.sh
+ *      ./full-test.sh
+ *      ./server/sockettest.sh
+ *      ./full-test.sh  
+ * 
+ * modified by: Tchuinkou Arnaud 
+ * Date: 2026-04-08 
+ * Assignment 5 Part 1 Instructions
+ * Link: https://www.coursera.org/learn/linux-system-programming-introduction-to-buildroot/supplement/c7ZrG/assignment-5-part-1-instructions
+ *********************************************************************/
 
-Enfin pour faire fonctionner le programme: 
-	dans une fenetre lancer: ./sockettest.sh  (depuis: cd aesd-assignments/assignment-autotest/test/assignment5)
-	mais avant il faudrait dans le premiere fenetre lancer: ./aesdsocket
-	
-Des que tout est bon lance: ./sockettest.sh (de la meme maniere laiser tourner d'abord ./aesdsocket
-# 
-*/
-
-/*--------------------------------------HEADERS----------------------------------------------*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <syslog.h>
-// to convert IP adress in ASCII
-#include <arpa/inet.h>
-// Nécessaire pour la gestion des signaux
-#include <signal.h> 
-//errno.h pour strerror()
-#include <errno.h>
-// Header for sockets
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
+
+#include <syslog.h>
+#include <signal.h>
+#include <errno.h>   // Pour errno et EINTR
+
 // Header for daemon
 #include "daemon_utils.h"
-/*------------------------------------End-HEADERS--------------------------------------------*/
 
-#define PORT 9000       // Port to bind the socket
+#define PORT 9000
 #define BUFFER_SIZE 1024
+#define FICHIER_SORTIE "/var/tmp/aesdsocketdata"
 
-/*-------------------------------------- Global ---------------------------------------------*/
-// Global Var for Server (ON/OFF) 
-volatile sig_atomic_t stop_server = 0;
+/*--------------------------------------Global Configs----------------------------------------------*/
+// Variable globale "volatile" pour être modifiée par le signal
+volatile sig_atomic_t keep_running = 1;
 
-// Handler for SIGINT (Ctrl+C) & SIGTERM (kill <PID>)
-void signal_handler(int sig) {
-        // Log comme demandé dans l'énoncé
-    const char *msg = " Caught signal, exiting \n";
-    write(STDERR_FILENO, msg, strlen(msg)); // Remplace printf (async-signal-safe)
-    syslog(LOG_INFO, "Caught signal, exiting\n");
-    stop_server = 1; // Met la variable à 1 pour arrêter la boucle
+// Analyse des options : -d
+int opt;
+int daemon_mode = 0;
+/*--------------------------------------------------------------------------------------------------*/
+
+// global variable to store the server socket file descriptor, needed for signal handler
+int server_fd = -1; // Socket pour le serveur, accessible globalement pour pouvoir le fermer dans le handler de signal
+int premiere_connexion = 1;
+
+/*---------------------------------End Global Configs----------------------------------------------*/
+
+/*--------------------------------------Global Fonctions--------------------------------------------*/
+
+void handle_signal(int sig) {   
+    keep_running = 0; // On demande à la boucle de s'arrêter
+    const char *msg = "\nSignal reçu !\n";
+    write(STDOUT_FILENO, msg, sizeof(msg)-1); // Affiche un message simple pour indiquer que le signal a été reçu (sans utiliser printf qui n'est pas sûr dans les handlers de signal)      
+    if (server_fd != -1) {
+        //shutdown(server_fd, SHUT_RDWR); // Réveille accept() immédiatement
+        close(server_fd); // Ferme le socket du serveur pour libérer la ressource et faire échouer les futurs accept()
+    }    
 }
 
-// Cleanup function for atexit (daemon mode)
-void cleanup(const char *filename) {
-    if (access(filename, F_OK) == 0) {
-        if (remove(filename) == 0) {
-            syslog(LOG_INFO, "Deleted temporary file %s", filename);
-        } else {
-            syslog(LOG_ERR, "Failed to delete file %s: %s", filename, strerror(errno));
-        }
-    }
-    closelog();
-}
-/*---------------------------------------- End Global -------------------------------------------*/
+/*---------------------------------End Global Functions----------------------------------------------*/
 
+int main( int argc, char *argv[])
+{
+    /*--------------------------------------Configs----------------------------------------------*/            
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    struct sockaddr_in address; // Structure pour l'adresse du socket    
+    char buffer[BUFFER_SIZE]= {0}; // Buffer pour stocker les données reçues du client
+    //memset(buffer, 0, BUFFER_SIZE); // Initialise tout à zéro
 
-int main(int argc, char *argv[]) {
-
-    /*--------------------------------------Configs----------------------------------------------*/
-    int is_daemon = 0;
-    const char *filename = "/var/tmp/aesdsocketdata";
-    int server_fd = -1;       // Initialiser à -1 (sécurité)
-    struct sockaddr_in address; // Structure pour l'adresse du socket
-    int opt = 1; // Décommenter pour setsockopt
-    socklen_t addrlen = sizeof(address);
-    
     // Configurer l'adresse du socket
-    memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;         // IPv4
-    address.sin_addr.s_addr = INADDR_ANY; // Écouter sur toutes les interfaces (localhost + réseau)
-    address.sin_port = htons(PORT);       // Convertir le port en format réseau (big-endian)
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(PORT); 
     
-    // Configuration of SIGINT / SIGTERM
+    // Configurer les handlers de signal pour SIGINT et SIGTERM        
     struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = signal_handler; // Associe le signal à la fonction handler
-    sigaction(SIGINT, &sa, NULL);   // Gère Ctrl+C
-    sigaction(SIGTERM, &sa, NULL);  // Gère kill <PID>
-    sigaction(SIGQUIT, &sa, NULL);  // Gère SIGQUIT (ajout pour daemon)
-    
+    memset(&sa, 0, sizeof(sa));  
+    sa.sa_handler = handle_signal; // Associe le signal à la fonction handler
+    // Permet à accept() d'être interrompu par un signal
+    sa.sa_flags = 0; 
+
+    // On bloque d'autres signaux pendant le handler
+    sigemptyset(&sa.sa_mask);
+    sigaddset(&sa.sa_mask, SIGINT);
+    sigaddset(&sa.sa_mask, SIGTERM);
+    sigaddset(&sa.sa_mask, SIGQUIT);
+
+    sigaction(SIGINT,  &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGQUIT, &sa, NULL);
+
     // --- open syslog ---
-    openlog("Log_aesdsocket", LOG_PID, LOG_USER);
-    /*-------------------------------------End-Configs-------------------------------------------*/
-     
-    /*--------------------------- option -d (mode daemon) ---------------------------------------*/
-    if (argc > 1 && strcmp(argv[1], "-d") == 0) {
-        is_daemon = 1;
-
-        // Convertir en daemon (utiliser la fonction de daemon_utils.h)
-        if (become_daemon() != 0) {
-            syslog(LOG_ERR, "Failed to become daemon: %m");
-            closelog();
-            return EXIT_FAILURE;
+    openlog("Log_aesdsocket", LOG_PID, LOG_USER);   
+    /*-------------------------------------End-Configs-------------------------------------------*/   
+    /*-------------------------------------daemon_mode-------------------------------------------*/   
+    // Analyse des options : -d
+    while ((opt = getopt(argc, argv, "d")) != -1) {
+        switch (opt) {
+            case 'd':
+                daemon_mode = 1;
+                break;
+            default:
+                fprintf(stderr, "Usage: %s [-d]\n", argv[0]);
+                exit(EXIT_FAILURE);
         }
-
-        // Reconfigure syslog for daemon
-        closelog();
-        openlog("aesdsocket", LOG_PID | LOG_CONS, LOG_USER);
-        syslog(LOG_INFO, "aesdsocket : Daemon started on port %d", PORT);
-
-        // Nettoyer le fichier à la fermeture
-        //atexit(() -> cleanup(filename)); // Utiliser atexit (pas exit(0) !)
-    } else {
-        // Mode interactif : afficher des infos dans la console
-        printf("aesdsocket : Mode interactif (port %d)\n", PORT);
-        printf("Pour lancer en daemon : %s -d\n", argv[0]);
-        printf("Arrêter le daemon : kill $(pgrep aesdsocket)\n");
     }
-    /*------------------------- End -option -d (mode daemon) ------------------------------------*/         
-    
-    /*------------------------2.b Opens a stream socket bound to port ---------------------------*/
+
+    // Si mode démon demandé, se détacher
+    if (daemon_mode) {
+        // Méthode manuelle ou appel à daemon()
+        if (daemon(1, 0) == -1) {  // 1 = chdir("/"), 0 = redirige stdin/out/err vers /dev/null
+            perror("daemon");
+            exit(EXIT_FAILURE);
+        }
+    }
+    /*-------------------------------------End-daemon_mode-------------------------------------------*/   
+
+    // open a socket bound on port 9000
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd == -1) {
-    	syslog(LOG_ERR, "Failed to create server socket: %m");
-        closelog(); 
-        return EXIT_FAILURE; // Remplacer return -1 par EXIT_FAILURE
-    }
-    /*-------------------------End -2.b ---------------------------------------------------------*/
-    
-    /*--------------------------------------Configs Socket--------------------------------------*/
-    // Option pour réutiliser le port (évite "port déjà utilisé")
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
-        syslog(LOG_ERR, "Failed to set socket options: %m");
-        close(server_fd);
-        closelog(); 
+    if (server_fd < 0) {
+        perror("Erreur socket");
         exit(EXIT_FAILURE);
-    }	
-   /*-------------------------------- End Configs Socket ---------------------------------------*/
+    }
+    int value = 1;// Permet de réutiliser le port immédiatement après la fermeture du serveur
+    int restart_server = setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value)); 
+        if (restart_server < 0) {    
+        perror("Erreur setsockopt");
+        syslog(LOG_INFO, "Erreur setsockopt sur le port %d", PORT);
+        close(server_fd);
+        exit(EXIT_FAILURE);
+    }
+    
+    // BIND (attacher au port)    
+    int bind_result = bind(server_fd, (struct sockaddr *)&address, sizeof(address));
+    if (bind_result < 0) {
+        perror("Erreur bind");
+        close(server_fd);
+        exit(EXIT_FAILURE);    }
 
-   /*---------------------------------------Bind Socket----------------------------------------*/
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        syslog(LOG_ERR, "Failed to bind socket: %m");
+    // accepter une  connexions
+    int listen_result = listen(server_fd, 5); // 5 = nombre de connexions en attente autorisées
+    if (listen_result < 0) {
+        perror("Erreur listen");
+        syslog(LOG_INFO, "Erreur listen sur le port %d", PORT);
         close(server_fd);
-        closelog(); 
-        exit(EXIT_FAILURE);
-    }
-   /*---------------------------------- End Bind Socket ----------------------------------------*/
-   
-   /*--------------------------2.c listen for and accept connection-----------------------------*/
-    if (listen(server_fd, 3) < 0) { // 3 = nombre max de connexions en attente
-    	syslog(LOG_ERR, "Failed to listen on socket: %m");
-    	close(server_fd);
-    	closelog(); 
-        exit(EXIT_FAILURE);
-    }
-    /*--------------------------End 2.c listen for and accept connection------------------------*/
-    
-    /*----------------------------- Main Loop: Accept connections ------------------------------*/
-    int count_connection = 0;
-    while (!stop_server) {   	
-    	count_connection++;
-    	if (!is_daemon) { // Only console output in interactive mode
-            printf("\nConnection number: %d\n", count_connection);
-            printf("Waiting for connection...\n");
-            printf("Server ready : Stream socket bound to port %d\n", PORT);
-        }
-        
-        // Accept new connection
-        int new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen);
-        
-        // Loop stops when stop_server activated (recieved signal)
-        if (stop_server) {
-            break;
-        }
-        
-        // Accept (connection) failed
-        if (new_socket < 0) {
-            syslog(LOG_ERR, "Accept Connection failed : %m");
-            continue; // (re)start the loop (wait new client)
+        exit(EXIT_FAILURE);    }    
+
+    printf("Serveur en attente sur le port %d...\n", PORT);
+    syslog(LOG_INFO, "Server started on port %d", PORT);    
+    int count_connection = -1; // Compteur de connexions pour afficher le numéro de connexion
+
+    while (keep_running) // Boucle principale du serveur, continue tant que keep_running est vrai (non interrompu par un signal)
+    {                  
+        // ACCEPTER UNE ou PLUSIEURS CONNEXIONS                
+        int new_socket; //= malloc(sizeof(int)); // Socket pour la connexion client
+        new_socket = accept(server_fd, (struct sockaddr *)&client_addr, &client_len); 
+
+        if (new_socket == -1) {
+            // EINTR signifie que accept a été interrompu par Ctrl+C
+            if (errno == EINTR || !keep_running) {
+                keep_running = 0; // Assurer que la boucle s'arrête
+                break; // ON SORT DU WHILE ICI
+            }
+            perror("accept");
+            break; // Sortir de la boucle en cas d'erreur d'accept
         }
 
-	/*---------------------- 2.d: LOG : Accepted connection from XXX -----------------------*/
+        // AJOUTER CES LIGNES
+        struct timeval timeout = {
+            .tv_sec = 2,   // 2 secondes max
+            .tv_usec = 0
+        };
+        setsockopt(new_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        setsockopt(new_socket, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+
         char client_ip[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &address.sin_addr, client_ip, INET_ADDRSTRLEN);
-	syslog(LOG_INFO, "Accepted connection from %s", client_ip);
-	/*---------------------------------------- End 2.d: ------------------------------------*/
+        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
+        printf("Connexion acceptée: %s !\n", client_ip);
+        syslog(LOG_INFO, "Accepted connection from %s", client_ip);
         
-        /*---------------------------------- 2.e: Data Reception -------------------------------*/
-	char recv_buffer[BUFFER_SIZE] = {0};  // Buffer fixe for datas
-	char *packet_buffer = NULL;  // dynamique buffer to save
-	size_t packet_len = 0;	
-	ssize_t bytes_read = 0;
-	
-	// Read client data until newline or connection closed
-	while ((bytes_read = read(new_socket, recv_buffer, BUFFER_SIZE - 1)) > 0 && !stop_server) 
-	{		    
-	    recv_buffer[bytes_read] = '\0'; // Terminer la chaîne
-	    char *newline_ptr = strchr(recv_buffer, '\n');
-	    
-	    if (newline_ptr != NULL) {
-		// === PAQUET COMPLET (détecté \n) ===
-		size_t part_len = newline_ptr - recv_buffer + 1; // +1 pour inclure le \n
-		
-	        char *temp_buffer = realloc(packet_buffer, packet_len + part_len);
-	        if (temp_buffer == NULL) {
-                    syslog(LOG_ERR, "Realloc failed: %s", strerror(errno));
-                    free(packet_buffer);
-                    close(new_socket);
-                    break;
-	        }
-	        packet_buffer = temp_buffer;
-	        memcpy(packet_buffer + packet_len, recv_buffer, part_len);
-	        packet_len += part_len;
+        // si le serveur reçoit un signal d'arrêt, il ferme la connexion et arrête le serveur
+        if (keep_running == 0) {
+            close(new_socket);
+            printf("Connexion fermée: %s !\n", client_ip);
+            syslog(LOG_INFO, "Closed connection from %s", client_ip);            
+            continue; // Sortir de la boucle principale pour arrêter le serveur
+        }    
 
-		// Écrire le paquet complet dans le fichier
-		FILE *fp = fopen(filename, "a");
-		if (fp == NULL) { // Supprimer la ligne dupliquée
-                    syslog(LOG_ERR, "Failed to open file %s for writing: %s", filename, strerror(errno));
-                    free(packet_buffer);
-                    close(new_socket);
+        // texte reçu du client, on s'assure que c'est une chaîne de caractères terminée par un null         
+        // write data to file
+        
+        FILE *file = fopen(FICHIER_SORTIE, "a");
+        if (file == NULL) {
+            perror("Erreur ouverture fichier");
+            close(new_socket);
+            printf("Connexion fermée: %s !\n", client_ip);            
+            continue;
+        }
+        size_t current_size = 0;
+        char *full_packet = NULL;
+        char recv_buf[512]; 
+        
+
+        // BOUCLE CORRECTE
+        while (keep_running) {  
+            ssize_t nr = recv(new_socket, recv_buf, sizeof(recv_buf), 0);
+
+            if (nr <= 0) {
+                break;
+            }
+
+            char *tmp = realloc(full_packet, current_size + nr);
+            if (!tmp) {
+                free(full_packet);
+                fclose(file);
+                close(new_socket);
+                continue;
+            }
+            full_packet = tmp;
+            memcpy(full_packet + current_size, recv_buf, nr);
+            current_size += nr;
+
+            if (memchr(full_packet, '\n', current_size)) {
+                break;
+            }
+        }
+
+        //printf("Received data from client: %.*s\n", (int)current_size, full_packet); // Afficher le paquet complet reçu du client
+        // 4. On écrit le paquet complet d'un coup dans le fichier
+        size_t written = fwrite(full_packet, 1, current_size, file);            
+        
+        if (written != current_size) {
+            // Erreur ! On logue et on ferme
+            syslog(LOG_ERR, "Erreur d'écriture : attendu %zu, écrit %zu", current_size, written);
+            perror("fwrite");
+        } else {
+            // Succès ! On force l'écriture physique sur le disque
+            fflush(file);             
+        }
+        
+        // 5. ON LIBÈRE (très important pour Valgrind)
+        free(full_packet);
+        fclose(file); // Fermer le fichier pour libérer les ressources et éviter les problèmes de verrouillage
+        //free(buffer);
+
+        // resend the data to client after writing to file
+        // 1. Ouvrir le fichier en lecture
+        file = fopen(FICHIER_SORTIE, "r");
+        if (file == NULL) {
+            perror("Erreur ouverture fichier pour lecture");
+            close(new_socket);
+            printf("Connexion fermée: %s !\n", client_ip);            
+            continue;
+        }
+        if (file) {
+            size_t bytes_read;
+            // Lire par blocs pour ne pas saturer la RAM (très important pour AESD)            
+            while ((bytes_read = fread(buffer, 1, BUFFER_SIZE, file)) > 0) {
+                //int result = send(new_socket, buffer, bytes_read, 0);
+                if (send(new_socket, buffer, bytes_read, 0) == -1) {
+                    perror("send");
                     break;
                 }
-		
-	        size_t written = fwrite(packet_buffer, 1, packet_len, fp);
-	        if (written != packet_len) {
-	            syslog(LOG_ERR, "Failed to write to file %s: %s", filename, strerror(errno));
-	        }
-	      	fflush(fp);
-                fclose(fp);
-                syslog(LOG_DEBUG, "Wrote %zu bytes to %s", written, filename);
+                //printf("Sent back to client: %.*s\n", (int)bytes_read, buffer); // Afficher ce qui est renvoyé au client
+            }            
+            //fclose(file); 
+            //close(new_socket);            
+        } 
+        fclose(file); // Fermer le fichier après la lecture pour libérer les ressources et éviter les problèmes de verrouillage
 
-		// Envoyer le fichier complet au client
-		fp = fopen(filename, "r");
-		if (fp == NULL) {
-     		    syslog(LOG_ERR, "Failed to open file %s for reading: %s", filename, strerror(errno));
-                    free(packet_buffer);
-                    close(new_socket);
-                    break;
-		}
-		
-		char file_buffer[BUFFER_SIZE];
-		ssize_t file_bytes;
-		while ((file_bytes = fread(file_buffer, 1, BUFFER_SIZE, fp)) > 0 && !stop_server) {
-	            ssize_t sent = send(new_socket, file_buffer, file_bytes, 0);
-                    if (sent == -1) {
-                        syslog(LOG_ERR, "Failed to send data to client %s: %m", client_ip);
-                        break;
-                    } else if (sent < file_bytes) {
-                        syslog(LOG_WARNING, "Partial send to client %s: sent %zd of %zd bytes",
-                               client_ip, sent, file_bytes);
-                    }
-		}
-		fclose(fp);
-		syslog(LOG_DEBUG, "File content sent to client");
-
-		// Réinitialiser le buffer de paquet
-		free(packet_buffer);
-		packet_buffer = NULL;
-		packet_len = 0;
-
-		// Gérer le reste des données (après le \n)
-		size_t remaining_len = bytes_read - part_len;
-		if (remaining_len > 0) {
-		    packet_buffer = malloc(remaining_len);
-		    if (packet_buffer == NULL) {
-	                syslog(LOG_ERR, "Malloc failed: %s", strerror(errno));
-	                close(new_socket);
-	                break;
-	            }	
-		    memcpy(packet_buffer, newline_ptr + 1, remaining_len);
-		    packet_len = remaining_len;
-		}
-	     } else {
-		// === PAQUET INCOMPLET (pas de \n) ===
-	        char *temp_buffer = realloc(packet_buffer, packet_len + bytes_read);
-	        if (temp_buffer == NULL) {
-		    syslog(LOG_ERR, "Realloc failed: %s", strerror(errno));
-                    free(packet_buffer);
-                    close(new_socket);
-                    break;
-	        }
-	        packet_buffer = temp_buffer;
-	        memcpy(packet_buffer + packet_len, recv_buffer, bytes_read);
-	        packet_len += bytes_read;
-	    }
-	    // Reset receive buffer
-            memset(recv_buffer, 0, sizeof(recv_buffer));
-	}
-
-	// Gestion erreur read()
-	if (bytes_read < 0 && !stop_server) {
-	    syslog(LOG_ERR, "Error reading from client %s: %m", client_ip);
-	}
-	
-	// Nettoyage du buffer de paquet
-	if (packet_buffer != NULL) {
-	    free(packet_buffer);
-	}
-
-        // Log fermeture connexion
-        syslog(LOG_INFO, "Closed connection from %s", client_ip);    
-        close(new_socket);
-    }
+    // --- ÉTAPE G : Fermeture et Log ---
+    //free(buffer);
+    close(new_socket);
     
-    /*------------------------ Server Shutdown Cleanup -------------------------*/
-    // Close server socket
-    if (server_fd != -1) {
-        close(server_fd);
-    }
-    
-    // Supprimer le fichier temporaire
-	if (access(filename, F_OK) == 0) {
-	if (remove(filename) == 0) {
-	    syslog(LOG_INFO, "Deleted temporary file %s", filename);
-	} else {
-	    syslog(LOG_ERR, "Failed to delete file %s: %s", filename, strerror(errno));
-	}
-    }
-    closelog();
-    
-    // Console output only in interactive mode
-    if (!is_daemon) {
-        printf("\nProgram stopped properly!\n");
-    }
+    printf("Connexion fermée: %s !\n", client_ip);
+    syslog(LOG_INFO, "Closed connection from %s", client_ip);
+            
+    }// End while (keep_running)
+
+    // 1. Log officiel exigé par l'énoncé
+    syslog(LOG_INFO, "Caught signal, exiting");
+
+    // 2. Nettoyage des threads (comme vu avec la liste chaînée)
+    // ... boucle pthread_join ...
+
+    // 3. Suppression du fichier (remove ou unlink)
+    unlink(FICHIER_SORTIE); 
+
+    // 4. Fermeture finale
+    close(server_fd);
+    closelog();    
 
     return 0;
 }

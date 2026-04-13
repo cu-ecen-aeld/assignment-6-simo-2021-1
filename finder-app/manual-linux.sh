@@ -1,9 +1,16 @@
 #!/bin/bash
 # ==============================================================================
-# Script d'installation et de compilation du noyau Linux ARM64 + rootfs/BusyBox
+# Script d'installation et de compilation manuel du noyau Linux ARM64 + rootfs/BusyBox
 # Auteur original : Siddhant Jajoo
 # Modifications/Adaptations : Arnaud (18DEC2025)
 # Objectif : Compiler un noyau Linux pour QEMU ARM64 et préparer un rootfs fonctionnel
+# ==============================================================================
+# Summrize of steps
+# 	- Download source for common packages from upstream
+#	- Cross Copilation
+#	- Build Components
+#	- Assemble rootfs in staging area
+#	- Create image files
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -15,12 +22,14 @@ set -u  # Arrêter le script si une variable non définie est utilisée
 
 # Chemins principaux (ABSOLUS pour éviter les erreurs de chemin relatif)
 	OUTDIR=/home/tchuinkou/aeld          # Dossier de sortie principal
+	# i-1) git clone the linux kernel
 	KERNEL_REPO=git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
 	KERNEL_VERSION=v5.15.163             # Version du noyau Linux
 	BUSYBOX_VERSION=1_33_1               # Version de BusyBox
 	FINDER_APP_DIR=$(realpath $(dirname $0))  # Dossier du script finder-app
 	ARCH=arm64                           # Architecture cible
-	CROSS_COMPILE=aarch64-none-linux-gnu- # Cross-compilateur ARM64
+	#aarch64-none-linux-gnu-  et aarch64-linux-gnu-  sont identique mais chez moi  j ai installé:aarch64-linux-gnu- 
+	CROSS_COMPILE=aarch64-linux-gnu- # Cross-compilateur ARM64
 
 # Variables spécifiques au rootfs (dossiers critiques)
 	DEV_DIR="${OUTDIR}/rootfs/dev"       # Dossier /dev du rootfs (périphériques)
@@ -76,7 +85,7 @@ if [ ! -e "${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image" ]; then
     #read -p "Appuyez sur ENTER pour ouvrir menuconfig (sauvegardez la config)..."
     echo -e "\n[2.2/17] Compilation noyau + modules ARM64..."
     make -j$(nproc) ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} defconfig menuconfig oldconfig Image modules
-
+    read -p "Appuyez sur ENTER pour continuer..."
     # Étape 2.3 : Installation des modules + vérifications
     echo -e "\n[2.3/17] Installation des modules dans le rootfs..."
     mkdir -p ${OUTDIR}/rootfs
@@ -168,7 +177,7 @@ echo "=== ÉTAPE 4 : COMPILATION ET INSTALLATION DE BUSYBOX ==="
 	echo "[12/17] Installation de BusyBox dans ${OUTDIR}/rootfs..."
 	make CONFIG_PREFIX="${OUTDIR}/rootfs" ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} install
 
-	#read -p "Appuie sur Entrée pour continuer..."  
+	read -p "Appuie sur Entrée pour continuer..."  
 	echo "                                                                                            "
 	# Vérification des dépendances de bibliothèques BusyBox (statique = pas de dépendances)
 	echo "[13/17] Vérification des dépendances de BusyBox (statique)..."
@@ -210,10 +219,19 @@ echo -e "\n"
 echo "=== ÉTAPE 6 : COMPILATION DE L'UTILITAIRE \"writer\" ==="
 # ------------------------------------------------------------------------------
 echo "[15/17] Compilation de l'utilitaire writer..."
-	cd "${WRITER_DIR}" 
-	make clean 2>/dev/null  # Nettoyage des anciennes compilations (sans afficher erreurs)
-	make CROSS_COMPILE=${CROSS_COMPILE} all -j$(nproc)     # Compilation ARM64
 
+	cd "${WRITER_DIR}" 
+	pwd
+	echo ""
+	read -p "2-Appuie sur Entrée pour continuer..."  
+	make clean 2>/dev/null  # Nettoyage des anciennes compilations (sans afficher erreurs)
+	 
+	aarch64-linux-gnu-gcc -o writer writer.c -Wall -g   
+	
+	file writer
+	
+	#make CROSS_COMPILE=${CROSS_COMPILE} all -j$(nproc)     # Compilation ARM64
+	 
 	# Vérification : Le fichier writer doit exister
 	if [ ! -f "${WRITER_DIR}/writer" ]; then
 	    echo "ERREUR : Échec de la compilation du writer !"
@@ -247,65 +265,26 @@ echo "[16/17] Copie des scripts/executables finder dans /home du rootfs..."
 # END TODO
 
 
-# ------------------------------------------------------------------------------
-# ÉTAPE 8 : CRÉATION DE /init STATIQUE ET INITRAMFS
-# ------------------------------------------------------------------------------
-echo "[17.1/17] Création du fichier /init (binaire statique ARM64)..."
-#read -p "Appuie sur Entrée pour continuer..."  
 
-# 1. Créer un fichier init.c temporaire (binaire statique)
-cat > /tmp/init.c << 'EOF'
-#include <stdio.h>
-#include <unistd.h>
-#include <sys/mount.h>
-#include <signal.h>
-
-void sigint_handler(int sig) {
-    (void)sig;
-    printf("\n QEMU fermé (Ctrl+C)\n");
-    _exit(0);
-}
-
-int main(void) {
-    printf("========================================\n");
-    printf(" Initramfs ARM64 OK (Linux 5.15.163)\n");
-    printf("========================================\n");
-
-    mount("proc", "/proc", "proc", 0, NULL);
-    mount("sysfs", "/sys", "sysfs", 0, NULL);
-    mount("devtmpfs", "/dev", "devtmpfs", 0, NULL);
-
-    signal(SIGINT, sigint_handler);
-
-    printf(" QEMU actif (Ctrl+C pour quitter)\n");
-    printf(" BusyBox disponible dans /bin/sh\n");
-
-    execl("/bin/sh", "sh", NULL);
-
-    while (1) sleep(60);
-}
-EOF
 
 # 2. Compiler /init en binaire statique ARM64
-	${CROSS_COMPILE}gcc -static -O2 -o /tmp/init /tmp/init.c
+	#${CROSS_COMPILE}gcc -static -O2 -o /tmp/init /tmp/init.c
 
 # 3. Copier /init dans le rootfs et définir les droits
-	sudo cp /tmp/init ${OUTDIR}/rootfs/init
-	sudo chown root:root ${OUTDIR}/rootfs/init
-	sudo chmod 755 ${OUTDIR}/rootfs/init  # rwxr-xr-x (droits root standard)
+	#sudo cp /tmp/init ${OUTDIR}/rootfs/init
+	#sudo chown root:root ${OUTDIR}/rootfs/init
+	#sudo chmod 755 ${OUTDIR}/rootfs/init  # rwxr-xr-x (droits root standard)
 
 # Vérification de /init
 	echo " Fichier /init (binaire statique) créé :"
-	ls -lh ${OUTDIR}/rootfs/init
-	${CROSS_COMPILE}file ${OUTDIR}/rootfs/init | grep "statically linked" && echo " /init est statique"
-
+	#ls -lh ${OUTDIR}/rootfs/init
+	#${CROSS_COMPILE}file ${OUTDIR}/rootfs/init | grep "statically linked" && echo " /init est statique"
 
 # TODO: Chown the root directory
 # Attribution des droits root (obligatoire pour le rootfs Linux)
 	echo "[17/17] Attribution des permissions root au rootfs..."
 	sudo chown -R root:root ${OUTDIR}/rootfs/
 # END TODO
-
 
 # TODO: Create initramfs.cpio.gz
 # Création de l'initramfs.cpio.gz (format newc OBLIGATOIRE)
@@ -335,7 +314,6 @@ EOF
 	    exit 1
 	fi
 # END TODO
-
 
 # ------------------------------------------------------------------------------
 # FIN DU SCRIPT

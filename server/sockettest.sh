@@ -36,6 +36,9 @@ done
 
 echo "Testing target ${target} on port ${port}"
 
+# Create a file to compare against, and initialize it with the contents of the socket data file
+#> /var/tmp/aesdsocketdata
+
 # Tests to ensure socket send/receive is working properly on an aesdsocket utility
 # running on the system
 # @param1 : The string to send
@@ -76,6 +79,7 @@ test_send_socket_string "abcdefg" ${comparefile}
 test_send_socket_string "hijklmnop" ${comparefile}
 test_send_socket_string "1234567890" ${comparefile}
 test_send_socket_string "9876543210" ${comparefile}
+#test_send_socket_string "||||||||||" ${comparefile}
 if [ -e long_string.txt ]; then
     echo "Sending long string from long_string.txt file"
     sendstring=`cat long_string.txt`

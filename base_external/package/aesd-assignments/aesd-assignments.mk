@@ -5,7 +5,7 @@
 # Works for builds root and qemu: 30DEC2025
 ##############################################################
 
-AESD_ASSIGNMENTS_VERSION = 1f890df 
+AESD_ASSIGNMENTS_VERSION = 8dbe362 
 AESD_ASSIGNMENTS_SITE =  git@github.com:simo-2021/Embedded-Temperature-Sensor-Calibrator.git
 AESD_ASSIGNMENTS_SITE_METHOD = git
 AESD_ASSIGNMENTS_GIT_SUBMODULES = YES

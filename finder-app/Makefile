@@ -1,28 +1,34 @@
-# Nouveau Makefile pour le Buildroot
-# 29DEC2025 - Arnaud SImo
+# Définir un préfixe pour cross-compiler
+CROSS_COMPILE ?= #aarch64-linux-gnu-
 
-
-# Nom de l'exécutable
+# Nom de l'exécutable final
 TARGET = writer
 
-# Sources
+# Nom du fichier source
 SRC = writer.c
 
-# Ne PAS définir CC : Buildroot le fournit
-# Ne PAS définir CROSS_COMPILE
+# Compilateur utilisé
+CC = $(CROSS_COMPILE)gcc
 
-# Ajouter nos flags sans écraser ceux de Buildroot
-CFLAGS += -Wall -g 
+# Options de compilation :
+# -Wall  : active les warnings (recommandé pour débutants)
+# -g     : ajoute les infos de debug (utile pour gdb)
+CFLAGS = -Wall -g
 
-# Règle par défaut
+# Règle par défaut (celle exécutée si on tape juste "make")
 all: $(TARGET)
 
-# Construction du binaire
+# Règle pour créer l'exécutable
+# $@ = nom de la cible (writer)
+# $< = premier fichier dépendant (writer.c)
 $(TARGET): $(SRC)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	#$(CC) $(CFLAGS) $< -o $@
+	$(CC) $(CFLAGS) -o $(TARGET) $(SRC)
 
-# Nettoyage
+# Nettoyage : supprime l'exécutable
 clean:
-	rm -f $(TARGET) *.o
+	rm -f $(TARGET)
 
+# Nettoyage total (ex: fichiers temporaires)
 distclean: clean
+	rm -f *.o

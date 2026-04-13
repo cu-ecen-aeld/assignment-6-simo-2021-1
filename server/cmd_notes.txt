@@ -1,0 +1,16 @@
+./aesdsocket -d
+ps aux | grep aesdsocket
+tail -f /var/log/syslog
+ps aux | grep aesdsocket
+kill 3187
+gcc -o aesdsocket aesdsocket.c &  ./aesdsocket -d 
+tail -f /var/log/syslog
+./aesdsocket -d
+history 10    
+./sockettest.sh 
+
+ echo "Mardi" | nc localhost 9000 & echo "Mercredi" | nc localhost 9000
+
+ arret https://www.doubao.com/chat/38420907419201282 
+
+ 

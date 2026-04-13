@@ -1,0 +1,59 @@
+# Définir un préfixe pour cross-compiler
+CROSS_COMPILE ?= #aarch64-none-linux-gnu-
+
+# Nom de l'exécutable final
+TARGET = writer
+
+# Nom du fichier source
+SRC = writer.c
+
+# Compilateur utilisé
+CC = $(CROSS_COMPILER)gcc
+
+# Options de compilation :
+# -Wall  : active les warnings (recommandé pour débutants)
+# -g     : ajoute les infos de debug (utile pour gdb)
+CFLAGS = -Wall -g
+
+# Règle par défaut (celle exécutée si on tape juste "make")
+all: $(TARGET)
+
+# Règle pour créer l'exécutable
+# $@ = nom de la cible (writer)
+# $< = premier fichier dépendant (writer.c)
+$(TARGET): $(SRC)
+	#$(CC) $(CFLAGS) $< -o $@
+	$(CC) $(CFLAGS) -o $(TARGET) $(SRC)
+
+# Nettoyage : supprime l'exécutable
+clean:
+	rm -f $(TARGET)
+
+# Nettoyage total (ex: fichiers temporaires)
+distclean: clean
+	rm -f *.o
+	
+pour avoir le fichier write de la platform:  AR aarch64 il faut faire: make CROSS_COMPILER=/usr/bin/aarch64-linux-gnu-   
+	---------------------------
+	
+# Nouveau Makefile pour Buildroot
+# 29DEC2025 - Arnaud Simo
+# Adapt: 04.02.2026
+
+
+TARGET = writer
+SRC = writer.c
+
+# Buildroot fournit CC via l'environnement
+CC := aarch64-buildroot-linux-gnu-gcc
+
+CFLAGS += -Wall -Werror
+LDFLAGS +=
+
+all: $(TARGET)
+
+$(TARGET): $(SRC)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+
+clean:
+	rm -f $(TARGET) *.o

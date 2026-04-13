@@ -2,6 +2,10 @@
 # Script to open qemu terminal.
 # Author: Siddhant Jajoo.
 
+# Emulate QEMU on an ARM64 system by using RAMDISK 
+# Goal: Boot the rootfs from RAM (temporary, non-persistent storage)
+
+
 set -e
 
 OUTDIR=$1
@@ -9,6 +13,7 @@ OUTDIR=$1
 if [ -z "${OUTDIR}" ]; then
     OUTDIR=/tmp/aeld
     echo "No outdir specified, using ${OUTDIR}"
+    echo "try this outdir:  ./start-qemu-terminal.sh /home/tchuinkou/aeld"
 fi
 
 KERNEL_IMAGE=${OUTDIR}/Image

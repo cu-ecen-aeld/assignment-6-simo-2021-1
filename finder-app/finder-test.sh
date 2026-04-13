@@ -18,8 +18,7 @@
 set -e
 set -u
 
-
-# Configuration cross-compilateur 
+# Add cross-compilateur 
 CROSS_COMPILE=aarch64-none-linux-gnu-
 CC="${CROSS_COMPILE}gcc"
 CFLAGS="-static -O2"  # Compilation statique (pas de dépendances de librairies)
