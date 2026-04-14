@@ -62,7 +62,7 @@ int premiere_connexion = 1;
 void handle_signal(int sig) {   
     keep_running = 0; // On demande à la boucle de s'arrêter
     const char *msg = "\nSignal reçu !\n";
-    write(STDOUT_FILENO, msg, sizeof(msg)-1); // Affiche un message simple pour indiquer que le signal a été reçu (sans utiliser printf qui n'est pas sûr dans les handlers de signal)      
+    (void)write(STDOUT_FILENO, msg, sizeof(msg)-1); // Affiche un message simple pour indiquer que le signal a été reçu (sans utiliser printf qui n'est pas sûr dans les handlers de signal)      
     if (server_fd != -1) {
         //shutdown(server_fd, SHUT_RDWR); // Réveille accept() immédiatement
         close(server_fd); // Ferme le socket du serveur pour libérer la ressource et faire échouer les futurs accept()
@@ -160,7 +160,7 @@ int main( int argc, char *argv[])
 
     printf("Serveur en attente sur le port %d...\n", PORT);
     syslog(LOG_INFO, "Server started on port %d", PORT);    
-    int count_connection = -1; // Compteur de connexions pour afficher le numéro de connexion
+    //int count_connection = -1; // Compteur de connexions pour afficher le numéro de connexion
 
     while (keep_running) // Boucle principale du serveur, continue tant que keep_running est vrai (non interrompu par un signal)
     {                  
