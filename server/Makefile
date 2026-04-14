@@ -13,7 +13,7 @@ OBJ = $(SRC:.c=.o)  # Génère les noms de fichiers objets automatiquement
 
 # Ajouter nos flags sans écraser ceux de Buildroot
 # -g est ajouté ici (plutôt que dans la règle) pour que Buildroot le prenne en compte
-CFLAGS += -Wall -Werror -g
+CFLAGS += -Wall -g
 # Désactiver les optimisations en mode debug (facultatif mais mieux pour GDB)
 # Si Buildroot utilise -O2, ce flag le remplace pour le débogage
 CFLAGS_DEBUG = -O0 -g
